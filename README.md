@@ -1,12 +1,17 @@
-2025-12-19 Scan Refresh Vine
+Amazon Vine FR — Scan Éval — Light
 Description du projet et manuel d’installation / d’utilisation
+
+Dernière mise à jour : 20/12/2025
+
 1. Description du projet
 
-Ce script Tampermonkey est un outil d’analyse avancée pour Amazon Vine France, conçu pour :
+Ce script Tampermonkey est un outil d’analyse avancée pour Amazon Vine France, conçu pour offrir une vision fiable, lisible et persistante des évaluations terminées (review-type=completed).
 
-Scanner toutes les évaluations terminées (review-type=completed)
+Il permet de :
 
-Classifier automatiquement la qualité des évaluations
+Scanner automatiquement toutes les évaluations terminées
+
+Classifier la qualité des évaluations en catégories normalisées
 
 Compter les éléments par catégorie :
 
@@ -22,104 +27,186 @@ Pauvre
 
 N.P. (non parvenu / non disponible)
 
-Gérer une double vision temporelle :
+Calculer un score pondéré (/4) basé sur les avis notés
 
-🔹 Depuis toujours (historique complet)
+Suivre les évolutions entre deux exécutions (deltas)
 
-🔹 Depuis éval (à partir de la période d’évaluation active)
+Mettre à jour uniquement les éléments “En attente” via un refresh incrémental sécurisé
 
-Mémoriser des informations Vine persistantes :
+Afficher les résultats directement dans l’interface Vine, sans export externe
 
-Date de début de la période d’évaluation
+Vision temporelle
 
-Date « Testeur Vine depuis »
+Le script fonctionne exclusivement sur la période d’évaluation active :
 
-Afficher les données directement dans l’interface Vine, sous forme de tableau lisible et compact, sans export externe
+🔹 Depuis éval : à partir de la date officielle de début de période Vine
 
-Principe fondamental du projet :
+Les éléments hors période sont automatiquement ignorés
 
-Le scan complet doit toujours être fiable, reproductible et indépendant de toute logique incrémentale.
+2. Principe fondamental du projet
 
-Tout ce qui concerne refresh, delta ou marker est volontairement séparé du scan principal.
+Le scan complet doit toujours être fiable, reproductible et indépendant.
 
-2. Architecture conceptuelle
+Principes clés :
 
-Le projet est organisé en blocs logiques clairement séparés.
+Le scan est idempotent et autonome
+
+Le refresh est incrémental et strictement séparé
+
+Aucune logique incrémentale n’interfère avec le scan
+
+Aucun “marker” n’est utilisé dans le scan
+
+Toute donnée persistée est validée et nettoyée
+
+Si ces règles sont enfreintes → bug garanti.
+
+3. Architecture conceptuelle
+
+Le projet est structuré en blocs indépendants.
 
 A. Scan (cœur du système)
 
 Scan séquentiel de toutes les pages Vine
 
-Rythme humain (2–4 secondes par page + pauses aléatoires)
+Rythme humain :
 
-Aucun marker
+2 à 4 secondes par page
+
+pauses aléatoires
 
 Aucune dépendance à un état précédent
 
-Produit un état complet et cohérent
+Aucune écriture partielle ou intermédiaire
 
-👉 C’est la brique centrale.
-Si elle est cassée, le projet perd toute fiabilité.
+Arrêt automatique :
+
+fin de période détectée
+
+captcha / login
+
+HTML invalide ou erreurs répétées
+
+👉 Le scan produit un état complet, cohérent et fiable.
 
 B. État persistant (LocalStorage)
 
-Stockage local, par domaine (amazon.fr), des données suivantes :
+Stockage local par domaine (amazon.fr) :
 
-Comptages globaux
+Comptages par catégorie
 
-Comptages de période
+Nombre total d’éléments scannés
 
 Nombre de pages scannées
 
-Date/heure du dernier scan
+Date / heure du dernier scan
 
-États précédents (pour calcul des deltas)
+État précédent (pour calcul des deltas)
 
-Période d’évaluation
+Période d’évaluation active
 
-Date Vine depuis
+Base ASIN dédiée au refresh (pending)
 
-Mode d’affichage (Tout / Période)
+Nettoyage automatique des entrées invalides ou “unknown”.
 
-Chaque chargement est validé et sécurisé.
+Aucune communication externe.
+Aucun serveur.
+Tout reste local.
 
 C. Capture Compte Vine (/vine/account)
 
 Fonctions dédiées qui :
 
-Lisent les dates depuis le DOM
+Lisent la date de début de période directement depuis le DOM
 
-Écrivent en mémoire une seule fois
+Supportent formats :
 
-Affichent une modale uniquement si une donnée change
+DD/MM/YYYY
 
-N’interfèrent jamais avec le scan ou le refresh
+mois français
+
+Écrivent en mémoire uniquement si la valeur change
+
+Affichent une modale d’information (2 secondes) uniquement en cas de modification
+
+⚠️ Cette capture :
+
+n’interfère jamais avec le scan
+
+n’interfère jamais avec le refresh
 
 D. Interface utilisateur (UI)
 
-Injection non invasive
+Injection non invasive dans la page Vine
+
+Layout flex :
+
+tableau à gauche
+
+carte score à droite
 
 Tableau clair à colonnes fixes
 
-En-tête informatif
+En-tête informatif :
 
-Menu contextuel (Tout / Période / Reset)
+Dernier scan
 
-Aucun polling continu
+Infos d’exécution
 
-E. Refresh (⚠️ en cours de conception)
+Carte “Score pondéré /4” :
 
-Le refresh n’est pas encore intégré car :
+nombre d’avis notés
 
-il cassait le scan
+label qualitatif (Excellent / Moyen / Mauvais)
 
-il mélangeait logique incrémentale et scan complet
+Animation visuelle légère (pulse x3) sur mise à jour
 
-il introduisait des effets de bord
+Synchronisation de hauteur :
 
-👉 Il sera implémenté comme une fonction séparée, jamais comme une modification du scan principal.
+carte = master
 
-3. Manuel d’installation
+tableau = slave (desktop)
+
+flow normal en mobile
+
+Aucun polling continu.
+Aucune surcharge DOM.
+
+E. Refresh (incrémental, sécurisé)
+
+Le refresh est désormais pleinement implémenté, en respectant strictement les règles d’or.
+
+Fonctionnement :
+
+S’appuie uniquement sur les éléments En attente
+
+Ne relance jamais un scan complet
+
+Accepte le déplacement (“shift”) des entrées entre pages
+
+Met à jour :
+
+les changements de statut
+
+les changements de note
+
+Ajuste correctement les compteurs :
+
+décrément ancien état
+
+incrément nouvel état
+
+Arrêt automatique :
+
+hors période
+
+captcha / login
+
+HTML invalide
+
+Le refresh est idempotent, sûr, et non destructif.
+
+4. Manuel d’installation
 Prérequis
 
 Navigateur desktop (Chrome, Edge, Firefox)
@@ -148,12 +235,8 @@ GM_addStyle → styles UI
 
 localStorage → persistance locale
 
-Aucune communication externe.
-Aucun serveur.
-Tout reste local.
-
-4. Manuel d’utilisation
-4.1 Première configuration (une seule fois)
+5. Manuel d’utilisation
+5.1 Première configuration (une seule fois)
 
 Aller sur
 👉 https://www.amazon.fr/vine/account
@@ -162,33 +245,24 @@ Le script :
 
 capture la période d’évaluation
 
-capture Testeur Vine depuis
-
-affiche une modale de confirmation (2 secondes)
+affiche une modale de confirmation
 
 Terminé.
-Aucune action supplémentaire nécessaire.
 
-4.2 Scan complet
+5.2 Scan complet
 
 Aller sur
 👉 https://www.amazon.fr/vine/vine-reviews?review-type=completed
 
-Cliquer sur Scann Éval
+Cliquer sur Scan
 
 Le script :
 
 démarre à la page 1
 
-scanne toutes les pages disponibles
+scanne toutes les pages de la période
 
-s’arrête proprement en cas de :
-
-captcha
-
-HTML anormal
-
-erreurs répétées
+s’arrête proprement si nécessaire
 
 En fin de scan :
 
@@ -196,24 +270,27 @@ tableau mis à jour
 
 deltas affichés
 
-Dernier Scann mis à jour
+score recalculé
 
-💡 Le scan est idempotent :
-tu peux le relancer quand tu veux.
+💡 Le scan peut être relancé à tout moment.
 
-4.3 Modes d’affichage
+5.3 Refresh
 
-Via le menu ▼ :
+Après un scan complet :
 
-Tout → historique complet
+Le bouton devient Refresh
 
-Période → uniquement Depuis éval
+Le refresh :
 
-Le choix est mémorisé.
+met à jour uniquement les “En attente”
 
-4.4 Reset
+ajuste les compteurs si nécessaire
 
-Menu ▼ → Reset
+n’altère jamais le scan de référence
+
+5.4 Reset
+
+Lien Reset dans l’interface.
 
 Efface :
 
@@ -221,9 +298,9 @@ comptages
 
 période
 
-mode d’affichage
+états précédents
 
-Vine depuis
+base refresh
 
 ⚠️ À utiliser uniquement si :
 
@@ -233,26 +310,25 @@ reset réel de Vine
 
 besoin de repartir de zéro
 
-5. Règles d’or du projet
+6. Règles d’or du projet
 
 Ne jamais mélanger scan et refresh
 
 Ne jamais utiliser de marker dans le scan
 
-Ne jamais sauvegarder un marker à mi-parcours
+Ne jamais sauvegarder un état partiel
 
-Ne jamais réinitialiser l’état pendant un refresh
+Ne jamais réinitialiser pendant un refresh
 
 UI ≠ logique métier
 
 Capture compte ≠ scan
 
-Si une modification enfreint une de ces règles → bug garanti.
+7. État actuel du projet
 
-6. État actuel du projet
-
-✔ Scan complet et stable
+✔ Scan complet stable
 ✔ Persistance fiable
-✔ Interface claire
-✔ Capture compte correcte
-⚠️ Refresh à concevoir proprement (prochaine étape)
+✔ Interface claire et lisible
+✔ Capture Compte Vine robuste
+✔ Refresh incrémental sécurisé
+✔ Bug des “articles non disponibles” corrigé

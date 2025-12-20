@@ -1,6 +1,20 @@
 Amazon Vine FR — Scan Éval — Light
 Description du projet et manuel d’installation / d’utilisation
 
+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+## 🎥 Vidéos — Installation & utilisation
+
+### 1️⃣ Installation initiale
+[![Installation Amazon Vine FR — Scan Éval](https://img.youtube.com/vi/jv_eiwLMNsQ/hqdefault.jpg)](https://www.youtube.com/watch?v=jv_eiwLMNsQ)
+
+### 2️⃣ Premier scan complet & refresh incrémental
+[![Premier scan et refresh Amazon Vine FR — Scan Éval](https://img.youtube.com/vi/IohRjMdgRas/hqdefault.jpg)](https://www.youtube.com/watch?v=IohRjMdgRas)
+
+(Merci a @Ellui pour les avoir réalisées)
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+
 Dernière mise à jour : 20/12/2025
 
 1. Description du projet

@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Amazon Vine FR — Scan Éval — "Light"
 // @namespace    https://tampermonkey.net/
-// @version      3.4.1-dev
-// @description  v3.3.9 baseline + robust Non approuvé workflow: status-column detection, real Amazon edit links, HTTP+iframe editability check, dedicated view, real modification tracking
+// @version      3.4.2-dev
+// @description  v3.3.9 baseline + Non approuvé workflow using exact Amazon status/action/editor/error markers and real Envoyer tracking
 // @author       Cris0338
 // @match        https://www.amazon.fr/vine/vine-reviews*
 // @match        https://www.amazon.fr/vine/account*
@@ -22,7 +22,7 @@
   const LS_KEY_PERIOD = `vine_eval_period_${HOST}`;
   const LS_KEY_ASIN_MAP = `vine_asin_map_${HOST}_refresh`;
   const NP_IF_EN_ATTENTE_OLDER_THAN_DAYS = 180;
-  const STATE_SCHEMA_VERSION = 4;
+  const STATE_SCHEMA_VERSION = 5;
   const ORDER = ['en attente', 'excellent', 'bien', 'juste', 'pauvre', 'n.p.'];
   const VISIBLE_ORDER = ['en attente', 'excellent', 'bien', 'juste', 'pauvre'];
   const NON_APPROVED_VIEW_PARAM = 'vine-eval-non-approved';
@@ -246,8 +246,8 @@
     const checkedRating = document.querySelector('input[type="radio"][name*="star"]:checked, input[type="radio"][name*="rating"]:checked');
     const rating = checkedRating?.value ??
       document.querySelector('[data-hook="rating-out-of-text"]')?.textContent ??
-      document.querySelector('[aria-label*="étoile"][aria-checked="true"]')?.getAttribute('aria-label') ??
-      document.querySelector('[aria-label*="star"][aria-checked="true"]')?.getAttribute('aria-label') ?? '';
+      document.querySelector('[role="radio"][aria-label*="étoile"][aria-checked="true"]')?.getAttribute('aria-label') ??
+      document.querySelector('[role="radio"][aria-label*="star"][aria-checked="true"]')?.getAttribute('aria-label') ?? '';
 
     const files = Array.from(document.querySelectorAll('input[type="file"]'))
       .flatMap(input => Array.from(input.files || []))
@@ -276,12 +276,27 @@
     return asin && map[asin] ? { key: asin, record: map[asin] } : null;
   }
 
+  function isRealAmazonSendControl(control) {
+    if (!control || !control.matches?.('input[type="submit"], button[type="submit"]')) return false;
+
+    if (control.matches('.ryp-submit-button-desktop .a-button-input[type="submit"]')) return true;
+
+    const labelledBy = control.getAttribute('aria-labelledby');
+    if (labelledBy) {
+      const label = document.getElementById(labelledBy);
+      if (label && normalizeLoose(label.textContent).includes('envoyer')) return true;
+    }
+
+    const label = normalizeLoose(control.textContent || control.value || control.getAttribute('aria-label') || '');
+    return label === 'envoyer';
+  }
+
   function initRealReviewModificationTracking() {
     if (!PATH.startsWith('/review/create-review')) return false;
     if (window.top !== window.self) return true;
 
     const start = () => {
-      const form = document.querySelector('#in-context-ryp-form');
+      const form = document.querySelector('form#in-context-ryp-form[data-testid="in-context-ryp-form"], form#in-context-ryp-form, form[data-testid="in-context-ryp-form"]');
       const text = document.querySelector('#reviewText');
       const title = document.querySelector('#reviewTitle');
       if (!form || !text || !title) return false;
@@ -306,13 +321,13 @@
         marked = true;
       };
 
-      form.addEventListener('submit', markIfReallyChanged, true);
-      document.addEventListener('click', (e) => {
-        const btn = e.target?.closest?.('button, input[type="submit"], input[type="button"]');
-        if (!btn) return;
-        const label = normalizeLoose(btn.textContent || btn.value || btn.getAttribute('aria-label') || '');
-        if (label.includes('envoyer') && !btn.disabled && btn.getAttribute('aria-disabled') !== 'true') markIfReallyChanged();
+      // Only a real submit produced by Amazon's Envoyer control can mark the review modified.
+      // Generic buttons injected by other userscripts inside the same form are deliberately ignored.
+      form.addEventListener('submit', (event) => {
+        if (!isRealAmazonSendControl(event.submitter)) return;
+        markIfReallyChanged();
       }, true);
+
       return true;
     };
 
@@ -365,13 +380,16 @@
   }
 
   function findColumnIndexes(doc) {
-    const headers = Array.from(doc.querySelectorAll('.vvp-reviews-table--heading-row th, .vvp-reviews-table thead th, table.vvp-reviews-table th'));
+    const headingRow = doc.querySelector('tr.vvp-reviews-table--heading-row');
+    const headers = Array.from(headingRow?.querySelectorAll(':scope > th') || []);
+
+    let status = headers.findIndex(h => h.id === 'vvp-reviews-table--review-content-heading');
+    let evaluation = headers.findIndex(h => h.id === 'vvp-reviews-table--review-quality-score-heading');
+
     const texts = headers.map(h => normalizeLoose(h.textContent));
-
-    let status = texts.findIndex(t => t.includes('statut du commentaire'));
+    if (status < 0) status = texts.findIndex(t => t.includes('statut du commentaire'));
     if (status < 0) status = texts.findIndex(t => t.includes('statut') && (t.includes('commentaire') || t.includes('avis')));
-
-    let evaluation = texts.findIndex(t => t.includes('evaluation') || t.includes('qualite'));
+    if (evaluation < 0) evaluation = texts.findIndex(t => t.includes('evaluation') || t.includes('qualite'));
 
     // Amazon FR current fallback (0-based): status=3, evaluation=4.
     if (status < 0) status = 3;
@@ -401,10 +419,16 @@
   }
 
   function extractAmazonEditLink(row) {
+    // Exact Amazon Vine control observed on rejected rows: "Revoir".
+    const exact = row.querySelector('a[name="vvp-reviews-table--review-item-btn"][href*="/review/create-review"]');
+    if (exact) return absoluteAmazonUrl(exact.getAttribute('href'));
+
     const links = Array.from(row.querySelectorAll('a[href]'));
     const byText = links.find(a => {
       const t = normalizeLoose(a.textContent || a.getAttribute('aria-label') || a.getAttribute('title') || '');
-      return (t.includes('modifier') && (t.includes('commentaire') || t.includes('avis'))) || t.includes('edit review');
+      return t === 'revoir' ||
+        (t.includes('modifier') && (t.includes('commentaire') || t.includes('avis'))) ||
+        t.includes('edit review');
     });
     if (byText) return absoluteAmazonUrl(byText.getAttribute('href'));
 
@@ -440,7 +464,7 @@
       const ts = Number(tsCell.getAttribute('data-order-timestamp'));
       if (!Number.isFinite(ts) || ts < startTs) continue;
 
-      // IMPORTANT: status is read independently from quality.
+      // Status is read independently from quality and only from Amazon's status column.
       const reviewStatusCell = cellAt(row, columns.status);
       const evalCell = cellAt(row, columns.evaluation);
       const statusText = (reviewStatusCell?.textContent || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
@@ -530,14 +554,18 @@
 
   function classifyEditabilityDocument(doc, rawText = '') {
     if (!doc) return null;
+
     if (
-      doc.querySelector('.ryp-error-page-text, #ryp-error-page-text, .ryp-icon-alert, #ryp-icon-alert') ||
-      rawText.includes('ryp-error-page-text') || rawText.includes('ryp-icon-alert')
+      doc.querySelector('[data-hook="ryp-error-page-text"], [data-hook="ryp-icon-alert"], .ryp-error-page-text, #ryp-error-page-text, .ryp-icon-alert, #ryp-icon-alert') ||
+      rawText.includes('data-hook="ryp-error-page-text"') ||
+      rawText.includes('data-hook="ryp-icon-alert"') ||
+      rawText.includes('ryp-error-page-text') ||
+      rawText.includes('ryp-icon-alert')
     ) return 'non-modifiable';
 
-    if (doc.querySelector('#in-context-ryp-form') && doc.querySelector('#reviewText') && doc.querySelector('#reviewTitle')) {
-      return 'modifiable';
-    }
+    const form = doc.querySelector('form#in-context-ryp-form[data-testid="in-context-ryp-form"], form#in-context-ryp-form, form[data-testid="in-context-ryp-form"]');
+    if (form && doc.querySelector('#reviewText') && doc.querySelector('#reviewTitle')) return 'modifiable';
+
     return null;
   }
 

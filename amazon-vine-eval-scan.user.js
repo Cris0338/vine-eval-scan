@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Amazon Vine FR — Scan Éval — "Light"
 // @namespace    https://tampermonkey.net/
-// @version      3.4.8-dev
+// @version      3.4.8
 // @description  v3.3.9 baseline + Non approuvé workflow, visited tracking, manual promotion and real Envoyer modification tracking
 // @author       Cris0338
 // @match        https://www.amazon.fr/vine/vine-reviews*

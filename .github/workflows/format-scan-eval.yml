@@ -1,0 +1,38 @@
+name: Format Scan Eval
+
+on:
+  push:
+    branches:
+      - feature/non-approuve-workflow
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: ${{ !contains(github.event.head_commit.message, '[format-done]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/non-approuve-workflow
+          fetch-depth: 0
+
+      - name: Format userscript
+        run: npx --yes prettier@3.3.3 --write amazon-vine-eval-scan.user.js
+
+      - name: Verify JavaScript syntax
+        run: node --check amazon-vine-eval-scan.user.js
+
+      - name: Commit formatting only
+        run: |
+          if git diff --quiet -- amazon-vine-eval-scan.user.js; then
+            echo "Already formatted"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add amazon-vine-eval-scan.user.js
+          git commit -m "Reformat v3.4.4-dev for readability [format-done]"
+          git push origin HEAD:feature/non-approuve-workflow

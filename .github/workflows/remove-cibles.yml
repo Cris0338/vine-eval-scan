@@ -1,0 +1,44 @@
+name: Remove cibles UI
+
+on:
+  push:
+    branches:
+      - feature/non-approuve-workflow
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[ui-done]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/non-approuve-workflow
+          fetch-depth: 0
+
+      - name: Remove cibles from visible Refresh status
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('amazon-vine-eval-scan.user.js')
+          s = p.read_text(encoding='utf-8')
+          old = 'status.textContent = `Refresh… page ${page} | cibles: ${pendingTargets.size}`;'
+          new = 'status.textContent = `Refresh… page ${page}`;'
+          if old not in s:
+              raise SystemExit('Expected cibles status string not found')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          PY
+
+      - name: Verify JavaScript syntax
+        run: node --check amazon-vine-eval-scan.user.js
+
+      - name: Commit UI cleanup
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add amazon-vine-eval-scan.user.js
+          git commit -m "Hide internal Refresh targets from UI [ui-done]"
+          git push origin HEAD:feature/non-approuve-workflow

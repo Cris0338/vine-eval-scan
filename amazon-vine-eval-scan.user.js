@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Amazon Vine FR — Scan Éval — "Light"
 // @namespace    https://tampermonkey.net/
-// @version      3.3.8
-// @description  Light version: Scans only evaluations from the current Vine evaluation period (date captured from /vine/account). Stops automatically when reaching older reviews. Simplified UI with "Scan"/"Refresh" button and "Reset" inline. + Refresh shift-robust + deltas + rating reconcile + ASIN robust (incl. ASIN from title) + stable synthetic fallback u_<ts> + UI flex/min-width + score in header + pulse (score + Excellent) 3x + height sync (card master, table slave)
+// @version      3.3.9
+// @description  Light version: Scans only evaluations from the current Vine evaluation period (date captured from /vine/account). Stops automatically when reaching older reviews. Simplified UI with "Scan"/"Refresh" button and "Reset" inline. + Approval-pending counter + Refresh shift-robust + deltas + rating reconcile + ASIN robust (incl. ASIN from title) + stable synthetic fallback u_<ts> + UI flex/min-width + score in header + pulse (score + Excellent) 3x + height sync (card master, table slave)
 // @author       Cris0338
 // @match        https://www.amazon.fr/vine/vine-reviews*
 // @match        https://www.amazon.fr/vine/account*
@@ -22,6 +22,7 @@
   const LS_KEY_PERIOD = `vine_eval_period_${HOST}`;
   const LS_KEY_ASIN_MAP = `vine_asin_map_${HOST}_refresh`;
   const NP_IF_EN_ATTENTE_OLDER_THAN_DAYS = 180;
+  const STATE_SCHEMA_VERSION = 2;
   const ORDER = ['en attente', 'excellent', 'bien', 'juste', 'pauvre', 'n.p.'];
 
   // --- Helpers ---
@@ -168,11 +169,14 @@
 
   // --- State management ---
   const emptyState = () => ({
+    schemaVersion: STATE_SCHEMA_VERSION,
     scannedItems: 0,
     pagesScanned: 0,
     counts: emptyCounts(),
+    pendingApproval: 0,
     lastScanAt: null,
     prevCounts: null,
+    prevPendingApproval: null,
     prevScannedItems: null,
     prevPagesScanned: null,
     prevScanAt: null,
@@ -186,7 +190,15 @@
       const st = JSON.parse(raw);
       st.counts ||= emptyCounts();
       for (const k of ORDER) if (typeof st.counts[k] !== 'number') st.counts[k] = 0;
-      st.fullScanDone ||= false;
+
+      // v3.3.9: the approval-status metric did not exist in older saved states.
+      // Force one full rescan so the new column is populated correctly.
+      const hasApprovalMetric = typeof st.pendingApproval === 'number';
+      if (!hasApprovalMetric) st.pendingApproval = 0;
+      if (typeof st.prevPendingApproval !== 'number') st.prevPendingApproval = null;
+      if (!hasApprovalMetric || st.schemaVersion !== STATE_SCHEMA_VERSION) st.fullScanDone = false;
+      else st.fullScanDone = !!st.fullScanDone;
+      st.schemaVersion = STATE_SCHEMA_VERSION;
       return st;
     } catch { return emptyState(); }
   }
@@ -477,6 +489,7 @@
                 <thead>
                   <tr>
                     <th style="width:260px;">Période</th>
+                    <th style="width:170px;">En attente d'approbation</th>
                     <th>En attente</th>
                     <th>Excellent</th>
                     <th>Bien</th>
@@ -494,6 +507,7 @@
                 <tbody>
                   <tr id="vineEvalRowPeriod">
                     <td class="vineEvalRowTitle" id="vineEvalPeriodTitle">Depuis éval</td>
+                    <td id="p-approval-pending"></td>
                     <td id="p-en-attente"></td>
                     <td id="p-excellent"></td>
                     <td id="p-bien"></td>
@@ -566,6 +580,20 @@
     }
   }
 
+  function fillApprovalPending(value, delta) {
+    const el = document.getElementById('p-approval-pending');
+    if (!el) return;
+    const val = Number.isFinite(Number(value)) ? Number(value) : 0;
+
+    let deltaHtml = '';
+    if (typeof delta === 'number' && delta !== 0) {
+      const cls = delta > 0 ? 'vineEvalDeltaPos' : 'vineEvalDeltaNeg';
+      const sign = delta > 0 ? '+' : '';
+      deltaHtml = ` <span class="${cls}">${sign}${delta}</span>`;
+    }
+    el.innerHTML = `<b>${val}</b>${deltaHtml}`;
+  }
+
   function pulse3(el) {
     if (!el) return;
     el.classList.remove('vinePulse3');
@@ -627,6 +655,7 @@
     if (!period) {
       row.classList.add('vineEvalMuted');
       title.textContent = 'Depuis éval (—)';
+      fillApprovalPending(0, null);
       fillRow(emptyCounts(), null);
       meta.innerHTML = `Période: — | Va sur "Compte Vine" pour récupérer la date
         <span class="vineEvalMetaSpacer"></span>
@@ -640,6 +669,10 @@
     title.textContent = `Depuis éval (${period.startDate})`;
 
     const deltas = computeDeltas(st.counts, st.prevCounts);
+    const approvalDelta = (typeof st.prevPendingApproval === 'number')
+      ? (st.pendingApproval ?? 0) - st.prevPendingApproval
+      : null;
+    fillApprovalPending(st.pendingApproval ?? 0, approvalDelta);
     fillRow(st.counts, deltas);
 
     const itemDelta = (typeof st.prevScannedItems === 'number') ? st.scannedItems - st.prevScannedItems : null;
@@ -706,10 +739,12 @@
   function extractFromDoc(doc, startTs) {
     const rows = doc.querySelectorAll('tr.vvp-reviews-table--row');
     const counts = emptyCounts();
+    let approvalPendingCount = 0;
     let items = 0;
     const currentAsins = {};
 
     for (const row of rows) {
+      const reviewStatusCell = row.querySelector('td:nth-child(4)');
       const evalCell = row.querySelector('td:nth-child(5)');
       const tsCell = row.querySelector('td[data-order-timestamp]');
       if (!evalCell || !tsCell) continue;
@@ -720,6 +755,9 @@
       const klass = classifyEval(evalCell.textContent, getRowAgeDays(ts));
       if (!klass || counts[klass] === undefined) continue;
 
+      const reviewStatus = normalize(reviewStatusCell?.textContent).replace(/’/g, "'");
+      const approvalPending = reviewStatus === "en attente d'approbation";
+
       // ASIN stable extraction
       let asin = extractAsinFromRow(row);
 
@@ -728,11 +766,16 @@
       if (!asin) asin = `u_${ts}`;
 
       counts[klass] += 1;
+      if (approvalPending) approvalPendingCount += 1;
       items += 1;
-      currentAsins[asin] = { state: klass, pending: klass === 'en attente' };
+      currentAsins[asin] = {
+        state: klass,
+        pending: klass === 'en attente',
+        approvalPending
+      };
     }
 
-    return { items, counts, currentAsins };
+    return { items, counts, approvalPendingCount, currentAsins };
   }
 
   function getLastPageFromDoc(doc) {
@@ -828,6 +871,7 @@
       let extracted = extractFromDoc(document, startTs);
       let items = extracted.items;
       let counts = extracted.counts;
+      let approvalPendingCount = extracted.approvalPendingCount;
       let currentAsins = extracted.currentAsins;
 
       if (items === 0) {
@@ -839,6 +883,7 @@
 
       Object.assign(asinMap, currentAsins);
       for (const k of Object.keys(counts)) st.counts[k] += counts[k];
+      st.pendingApproval += approvalPendingCount;
       st.scannedItems += items;
       st.pagesScanned = 1;
       st.lastScanAt = new Date().toISOString();
@@ -865,6 +910,7 @@
         extracted = extractFromDoc(doc, startTs);
         items = extracted.items;
         counts = extracted.counts;
+        approvalPendingCount = extracted.approvalPendingCount;
         currentAsins = extracted.currentAsins;
 
         if (items === 0) {
@@ -884,6 +930,7 @@
 
         Object.assign(asinMap, currentAsins);
         for (const k of Object.keys(counts)) st.counts[k] += counts[k];
+        st.pendingApproval += approvalPendingCount;
         st.scannedItems += items;
         st.pagesScanned += 1;
         st.lastScanAt = new Date().toISOString();
@@ -930,12 +977,15 @@
     let changes = 0;
 
     st.prevCounts = st.counts ? { ...st.counts } : emptyCounts();
+    st.prevPendingApproval = typeof st.pendingApproval === 'number' ? st.pendingApproval : 0;
     st.prevScannedItems = typeof st.scannedItems === 'number' ? st.scannedItems : 0;
     st.prevPagesScanned = typeof st.pagesScanned === 'number' ? st.pagesScanned : 0;
     st.prevScanAt = st.lastScanAt ?? null;
 
     const pendingTargets = new Set(
-      Object.entries(asinMap).filter(([, v]) => v && v.pending).map(([asin]) => asin)
+      Object.entries(asinMap)
+        .filter(([, v]) => v && (v.pending || v.approvalPending))
+        .map(([asin]) => asin)
     );
 
     if (status) status.textContent = `Refresh en cours… pending: ${pendingTargets.size}`;
@@ -1013,20 +1063,35 @@
           const old = asinMap[asin];
 
           if (old) {
+            let changedThisItem = false;
+
             if (old.state !== info.state) {
               st.counts[old.state] = Math.max(0, (st.counts[old.state] ?? 0) - 1);
               st.counts[info.state] = (st.counts[info.state] ?? 0) + 1;
-              changes++;
+              changedThisItem = true;
             }
+
+            if (!!old.approvalPending !== !!info.approvalPending) {
+              st.pendingApproval = Math.max(
+                0,
+                (st.pendingApproval ?? 0) + (info.approvalPending ? 1 : -1)
+              );
+              changedThisItem = true;
+            }
+
+            if (changedThisItem) changes++;
           } else {
             st.counts[info.state] = (st.counts[info.state] ?? 0) + 1;
+            if (info.approvalPending) st.pendingApproval = (st.pendingApproval ?? 0) + 1;
             st.scannedItems = (st.scannedItems ?? 0) + 1;
             changes++;
           }
 
           asinMap[asin] = info;
 
-          if (pendingTargets.has(asin) && !info.pending) pendingTargets.delete(asin);
+          if (pendingTargets.has(asin) && !info.pending && !info.approvalPending) {
+            pendingTargets.delete(asin);
+          }
         }
 
         page++;

@@ -1319,7 +1319,7 @@
         outOfPeriodStreak < 2
       ) {
         if (status)
-          status.textContent = `Refresh… page ${page} | cibles: ${pendingTargets.size}`;
+          status.textContent = `Refresh… page ${page}`;
         let doc = page === 1 ? document : null;
         if (!doc) {
           await paceBetweenPages();

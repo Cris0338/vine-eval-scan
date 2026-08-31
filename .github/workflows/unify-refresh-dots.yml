@@ -1,49 +1,10 @@
-name: Unify Refresh dots
+name: Retired - Unify Refresh dots
 
 on:
-  push:
-    branches:
-      - feature/non-approuve-workflow
-
-permissions:
-  contents: write
+  workflow_dispatch:
 
 jobs:
-  patch:
-    if: ${{ !contains(github.event.head_commit.message, '[refresh-dots-unified]') }}
+  noop:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout branch
-        uses: actions/checkout@v4
-        with:
-          ref: feature/non-approuve-workflow
-          fetch-depth: 0
-
-      - name: Patch special Refresh status
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          p = Path('amazon-vine-eval-scan.user.js')
-          s = p.read_text(encoding='utf-8')
-          s = s.replace('// @version      3.4.7-dev', '// @version      3.4.8-dev', 1)
-          old = 'status.textContent = `Refresh… page ${page} | Non approuvé: contrôle…`;'
-          new = 'status.innerHTML = `Refresh page ${page} | Non approuvé: contrôle <span class="vineRefreshDots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>`;'
-          if old not in s:
-              raise SystemExit('Expected special Refresh status not found')
-          s = s.replace(old, new, 1)
-          p.write_text(s, encoding='utf-8')
-          PY
-
-      - name: Format and verify
-        run: |
-          npx --yes prettier@3.3.3 --write amazon-vine-eval-scan.user.js
-          node --check amazon-vine-eval-scan.user.js
-          npx --yes eslint@8 --no-eslintrc --env browser,es2022 --parser-options '{"ecmaVersion":2022}' --rule 'curly:["error","all"]' amazon-vine-eval-scan.user.js
-
-      - name: Commit patch
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add amazon-vine-eval-scan.user.js
-          git commit -m "Unify Refresh animated dots [refresh-dots-unified]"
-          git push origin HEAD:feature/non-approuve-workflow
+      - run: echo "Retired temporary workflow"

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Amazon Vine FR — Scan Éval — "Light"
 // @namespace    https://tampermonkey.net/
-// @version      3.4.7-dev
+// @version      3.4.8-dev
 // @description  v3.3.9 baseline + Non approuvé workflow, visited tracking, manual promotion and real Envoyer modification tracking
 // @author       Cris0338
 // @match        https://www.amazon.fr/vine/vine-reviews*
@@ -1561,7 +1561,7 @@
           seen.add(entry.key);
           const old = asinMap[entry.key] || null;
           if (status && entry.nonApproved) {
-            status.textContent = `Refresh… page ${page} | Non approuvé: contrôle…`;
+            status.innerHTML = `Refresh page ${page} | Non approuvé: contrôle <span class="vineRefreshDots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>`;
           }
           const info = await enrichNonApproved(entry, old);
           if (old) {

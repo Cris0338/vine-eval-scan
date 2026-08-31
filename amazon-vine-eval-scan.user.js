@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Amazon Vine FR — Scan Éval — "Light"
 // @namespace    https://tampermonkey.net/
-// @version      3.4.2-dev
-// @description  v3.3.9 baseline + Non approuvé workflow using exact Amazon status/action/editor/error markers and real Envoyer tracking
+// @version      3.4.3-dev
+// @description  v3.3.9 baseline + Non approuvé workflow, visited/verified tracking and real Envoyer modification tracking
 // @author       Cris0338
 // @match        https://www.amazon.fr/vine/vine-reviews*
 // @match        https://www.amazon.fr/vine/account*
@@ -239,6 +239,15 @@
     return m ? m[1].toUpperCase() : null;
   }
 
+  function extractAsinFromCurrentUrl() {
+    try {
+      const asin = new URL(location.href).searchParams.get('asin');
+      return asin && /^[A-Z0-9]{10}$/i.test(asin) ? asin.toUpperCase() : null;
+    } catch {
+      return null;
+    }
+  }
+
   function captureReviewEditorSnapshot() {
     const title = document.querySelector('#reviewTitle')?.value ?? '';
     const text = document.querySelector('#reviewText')?.value ?? '';
@@ -254,7 +263,7 @@
       .map(f => `${f.name}|${f.size}|${f.type}|${f.lastModified}`)
       .sort();
 
-    const media = Array.from(document.querySelectorAll('[data-hook*="media"] img[src], [data-hook*="media"] video[src], .ryp-media img[src], .ryp-media video[src]'))
+    const media = Array.from(document.querySelectorAll('[data-hook*="media"] img[src], [data-hook*="media"] video[src], [data-testid*="media"] img[src], [data-testid*="media"] video[src], [class*="media"] img[src], [class*="media"] video[src]'))
       .map(el => el.getAttribute('src') || '')
       .filter(Boolean)
       .sort();
@@ -262,7 +271,7 @@
     return JSON.stringify({ title, text, rating: normalize(rating), files, media });
   }
 
-  function findStoredReviewForCurrentEditor() {
+  function findStoredReviewForCurrentPage() {
     const map = loadAsinMap();
     const current = normalizeUrlForMatch(location.href);
 
@@ -272,8 +281,36 @@
       if (rec.editResolvedUrl && normalizeUrlForMatch(rec.editResolvedUrl) === current) return { key, record: rec };
     }
 
-    const asin = extractAsinFromAnyNode(document);
+    const asin = extractAsinFromCurrentUrl() || extractAsinFromAnyNode(document);
     return asin && map[asin] ? { key: asin, record: map[asin] } : null;
+  }
+
+  function markCurrentReviewBlockedIfPresent() {
+    const blocked = document.querySelector('[data-hook="ryp-error-page-text"], [data-hook="ryp-icon-alert"]');
+    if (!blocked) return false;
+
+    const target = findStoredReviewForCurrentPage();
+    if (!target) return true;
+
+    const map = loadAsinMap();
+    const rec = map[target.key];
+    if (!rec) return true;
+
+    const now = new Date().toISOString();
+    rec.visited = true;
+    rec.visitedAt ||= now;
+    rec.manualVerified = true;
+    rec.manualVerifiedAt = now;
+    rec.editability = 'non-modifiable';
+    rec.checkedAt = now;
+    rec.editResolvedUrl = location.href;
+    map[target.key] = rec;
+    saveAsinMap(map);
+
+    const st = loadState();
+    applyNonApprovedTotalsFromMap(st, map);
+    saveState(st);
+    return true;
   }
 
   function isRealAmazonSendControl(control) {
@@ -296,12 +333,14 @@
     if (window.top !== window.self) return true;
 
     const start = () => {
+      if (markCurrentReviewBlockedIfPresent()) return true;
+
       const form = document.querySelector('form#in-context-ryp-form[data-testid="in-context-ryp-form"], form#in-context-ryp-form, form[data-testid="in-context-ryp-form"]');
       const text = document.querySelector('#reviewText');
       const title = document.querySelector('#reviewTitle');
       if (!form || !text || !title) return false;
 
-      const target = findStoredReviewForCurrentEditor();
+      const target = findStoredReviewForCurrentPage();
       if (!target) return true;
 
       const initialSnapshot = captureReviewEditorSnapshot();
@@ -688,7 +727,7 @@
     #vineEvalScoreHead{background:#007185;color:#fff;padding:8px 10px;font-weight:800;display:flex;justify-content:space-between;align-items:center;}.vineScoreHeadRight{display:flex;align-items:baseline;gap:6px;}.vineScoreHeadVal{font-size:22px;font-weight:900;color:#26d926;line-height:1;}.vineScoreHeadMax{opacity:.9;font-weight:800;}
     #vineEvalScoreBody{padding:10px;display:flex;flex-direction:column;gap:6px;}.vineScoreMetaRow{display:flex;align-items:center;justify-content:space-between;gap:10px;}.vineScoreLabel,.vineScoreDen{font-size:12px;font-weight:800;opacity:.8;}.vineScoreHint{font-size:14px;font-weight:900;}.vineScoreExcellent{color:#26d926!important;}
     #vineNonApprovedPage{margin:16px 0 28px;border:1px solid #d5d9d9;border-radius:12px;overflow:hidden;background:#fff;color:#111;}#vineNonApprovedPage .nap-head{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#007185;color:#fff;padding:14px 16px;}#vineNonApprovedPage .nap-head h2{margin:0;font-size:20px;}#vineNonApprovedPage .nap-back{color:#fff;text-decoration:underline;font-weight:700;}
-    #vineNonApprovedPage .nap-section{padding:16px;}#vineNonApprovedPage .nap-section h3{margin:0 0 12px;font-size:18px;}#vineNonApprovedPage .nap-separator{height:8px;background:linear-gradient(90deg,#007185,#d5d9d9,#007185);margin:4px 0;border-top:1px solid #007185;border-bottom:1px solid #007185;}#vineNonApprovedPage .nap-table-wrap{overflow-x:auto;}#vineNonApprovedPage table{width:100%;border-collapse:collapse;min-width:820px;}#vineNonApprovedPage th{background:#f0f2f2;text-align:left;padding:9px;border-bottom:1px solid #d5d9d9;white-space:nowrap;}#vineNonApprovedPage td{padding:9px;border-bottom:1px solid #eee;vertical-align:middle;}#vineNonApprovedPage .nap-img{width:64px;height:64px;object-fit:contain;}#vineNonApprovedPage .nap-action{display:inline-block;padding:6px 10px;border-radius:16px;background:#ffd814;border:1px solid #fcd200;color:#111;text-decoration:none;font-weight:700;white-space:nowrap;}#vineNonApprovedPage .nap-verify{background:#fff;border-color:#888;}#vineNonApprovedPage .nap-modified{font-weight:900;color:#067d62;}#vineNonApprovedPage .nap-empty{padding:12px;border:1px dashed #aaa;border-radius:8px;opacity:.75;}
+    #vineNonApprovedPage .nap-section{padding:16px;}#vineNonApprovedPage .nap-section h3{margin:0 0 12px;font-size:18px;}#vineNonApprovedPage .nap-separator{height:8px;background:linear-gradient(90deg,#007185,#d5d9d9,#007185);margin:4px 0;border-top:1px solid #007185;border-bottom:1px solid #007185;}#vineNonApprovedPage .nap-table-wrap{overflow-x:auto;}#vineNonApprovedPage table{width:100%;border-collapse:collapse;min-width:820px;}#vineNonApprovedPage th{background:#f0f2f2;text-align:left;padding:9px;border-bottom:1px solid #d5d9d9;white-space:nowrap;}#vineNonApprovedPage td{padding:9px;border-bottom:1px solid #eee;vertical-align:middle;}#vineNonApprovedPage .nap-img{width:64px;height:64px;object-fit:contain;}#vineNonApprovedPage .nap-action{display:inline-block;padding:6px 10px;border-radius:16px;background:#ffd814;border:1px solid #fcd200;color:#111;text-decoration:none;font-weight:700;white-space:nowrap;}#vineNonApprovedPage .nap-verify{background:#fff;border-color:#888;}#vineNonApprovedPage .nap-visited{background:#f3f3f3!important;border-color:#888!important;color:#555!important;}#vineNonApprovedPage .nap-verified{background:#edf7ed!important;border-color:#067d62!important;color:#067d62!important;}#vineNonApprovedPage .nap-modified{font-weight:900;color:#067d62;}#vineNonApprovedPage .nap-empty{padding:12px;border:1px dashed #aaa;border-radius:8px;opacity:.75;}
   `);
 
   function getButtonsContainer() { return document.querySelector('#vvp-review-button-container'); }
@@ -761,6 +800,14 @@
       document.addEventListener('click', e => {
         if (e.target?.id === 'vineResetLinkInline') { e.preventDefault(); resetAllData(); }
       }, true);
+    }
+
+    if (!document.documentElement.dataset.vineEvalStorageHandler) {
+      document.documentElement.dataset.vineEvalStorageHandler = '1';
+      window.addEventListener('storage', e => {
+        if (e.key !== LS_KEY_ASIN_MAP && e.key !== LS_KEY_STATE) return;
+        render(loadState());
+      });
     }
 
     const st = loadState();
@@ -866,13 +913,46 @@
     const unknown = Object.values(map).filter(r => r?.nonApproved && r.editability !== 'modifiable' && r.editability !== 'non-modifiable').sort((a,b)=>(b.orderTs||0)-(a.orderTs||0));
 
     let root = document.getElementById('vineNonApprovedPage');
-    if (!root) { root = document.createElement('div'); root.id = 'vineNonApprovedPage'; document.getElementById('vineEvalWrapper')?.insertAdjacentElement('afterend', root); }
+    if (!root) {
+      root = document.createElement('div');
+      root.id = 'vineNonApprovedPage';
+      document.getElementById('vineEvalWrapper')?.insertAdjacentElement('afterend', root);
+    }
+
+    if (!root.dataset.visitHandler) {
+      root.dataset.visitHandler = '1';
+      root.addEventListener('click', e => {
+        const link = e.target?.closest?.('a[data-nap-check-key]');
+        if (!link) return;
+        const key = link.getAttribute('data-nap-check-key');
+        if (!key) return;
+        const latest = loadAsinMap();
+        const rec = latest[key];
+        if (!rec) return;
+        const now = new Date().toISOString();
+        rec.visited = true;
+        rec.visitedAt ||= now;
+        latest[key] = rec;
+        saveAsinMap(latest);
+        link.classList.remove('nap-verified');
+        link.classList.add('nap-visited');
+        link.textContent = '✓ Visité';
+      }, true);
+    }
 
     const product = r => r.productUrl ? `<a href="${escapeHtml(r.productUrl)}" target="_blank" rel="noopener">${escapeHtml(r.productTitle||'Produit')}</a>` : escapeHtml(r.productTitle||'Produit');
     const image = r => r.imageUrl ? `<img class="nap-img" src="${escapeHtml(r.imageUrl)}" alt="">` : '—';
+    const checkButton = r => {
+      if (!r.editUrl) return '—';
+      const key = escapeHtml(r.key || '');
+      if (r.manualVerified) return `<a class="nap-action nap-verify nap-verified" data-nap-check-key="${key}" href="${escapeHtml(r.editUrl)}" target="_blank" rel="noopener">✓ Vérifié</a>`;
+      if (r.visited) return `<a class="nap-action nap-verify nap-visited" data-nap-check-key="${key}" href="${escapeHtml(r.editUrl)}" target="_blank" rel="noopener">✓ Visité</a>`;
+      return `<a class="nap-action nap-verify" data-nap-check-key="${key}" href="${escapeHtml(r.editUrl)}" target="_blank" rel="noopener">Vérifier</a>`;
+    };
+
     const modRows = modifiable.map(r => `<tr><td>${image(r)}</td><td>${product(r)}</td><td>${escapeHtml(r.orderDateText||'—')}</td><td>${escapeHtml(r.reviewStatus||'Non approuvé')}</td><td>${r.modified?'<span class="nap-modified">✓ Modifié</span>':'—'}</td><td><a class="nap-action" href="${escapeHtml(r.editUrl)}" target="_blank" rel="noopener">Modifier le commentaire</a></td></tr>`).join('');
-    const noRows = nonModifiable.map(r => `<tr><td>${image(r)}</td><td>${product(r)}</td><td>${escapeHtml(r.orderDateText||'—')}</td><td>${escapeHtml(r.reviewStatus||'Non approuvé')}</td><td>${r.editUrl?`<a class="nap-action nap-verify" href="${escapeHtml(r.editUrl)}" target="_blank" rel="noopener">Vérifier</a>`:'—'}</td></tr>`).join('');
-    const unknownRows = unknown.map(r => `<tr><td>${image(r)}</td><td>${product(r)}</td><td>${escapeHtml(r.orderDateText||'—')}</td><td>${escapeHtml(r.reviewStatus||'Non approuvé')}</td><td>${r.editUrl?`<a class="nap-action nap-verify" href="${escapeHtml(r.editUrl)}" target="_blank" rel="noopener">Vérifier</a>`:'Lien Amazon introuvable'}</td></tr>`).join('');
+    const noRows = nonModifiable.map(r => `<tr><td>${image(r)}</td><td>${product(r)}</td><td>${escapeHtml(r.orderDateText||'—')}</td><td>${escapeHtml(r.reviewStatus||'Non approuvé')}</td><td>${checkButton(r)}</td></tr>`).join('');
+    const unknownRows = unknown.map(r => `<tr><td>${image(r)}</td><td>${product(r)}</td><td>${escapeHtml(r.orderDateText||'—')}</td><td>${escapeHtml(r.reviewStatus||'Non approuvé')}</td><td>${r.editUrl?checkButton(r):'Lien Amazon introuvable'}</td></tr>`).join('');
 
     root.innerHTML = `<div class="nap-head"><h2>Non approuvés</h2><a class="nap-back" href="${normalReviewsUrl()}">← Retour aux avis</a></div>
       <section class="nap-section"><h3>Modifiables — ${modifiable.length} ✏️</h3>${modifiable.length?`<div class="nap-table-wrap"><table><thead><tr><th>Image</th><th>Produit</th><th>Date de la commande</th><th>Statut du commentaire</th><th>Modifié</th><th>Action</th></tr></thead><tbody>${modRows}</tbody></table></div>`:'<div class="nap-empty">Aucun commentaire modifiable.</div>'}</section>

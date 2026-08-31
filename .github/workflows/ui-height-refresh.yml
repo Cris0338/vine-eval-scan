@@ -1,0 +1,54 @@
+name: Fix Refresh UI and card height
+
+on:
+  push:
+    branches:
+      - feature/non-approuve-workflow
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[ui-height-done]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/non-approuve-workflow
+          fetch-depth: 0
+
+      - name: Patch UI
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('amazon-vine-eval-scan.user.js')
+          s = p.read_text(encoding='utf-8')
+
+          replacements = [
+              ('// @version      3.4.4-dev', '// @version      3.4.5-dev'),
+              ('status.textContent = "Refresh en cours…";', 'status.textContent = "Refresh…";'),
+              ('status.textContent = `Refresh… page ${page}`;', 'status.textContent = "Refresh…";'),
+              ('#vineEvalTableWrap{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;', '#vineEvalTableWrap{flex:1 1 auto;min-width:0;height:106px;display:flex;flex-direction:column;'),
+              ('#vineEvalScoreWrap{flex:0 0 240px;min-width:240px;', '#vineEvalScoreWrap{flex:0 0 240px;min-width:240px;height:106px;'),
+          ]
+
+          for old, new in replacements:
+              if old not in s:
+                  raise SystemExit(f'Expected string not found: {old}')
+              s = s.replace(old, new, 1)
+
+          p.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Verify JavaScript syntax
+        run: node --check amazon-vine-eval-scan.user.js
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add amazon-vine-eval-scan.user.js
+          git commit -m "Fix Refresh status and align cards to fixed height [ui-height-done]"
+          git push origin HEAD:feature/non-approuve-workflow

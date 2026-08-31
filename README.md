@@ -1,9 +1,15 @@
-Amazon Vine FR — Scan Éval — Light
-Description du projet et manuel d’installation / d’utilisation
+# Amazon Vine FR — Scan Éval — Light
 
---------------------------------------------------------------------------------------------------------------------------------------------------------------
+Script Tampermonkey pour Amazon Vine France. Il analyse les avis terminés de la période d’évaluation en cours, affiche les compteurs directement dans Vine, calcule un score pondéré et permet de suivre les avis `Non approuvé`.
+
+Version actuelle : **3.4.8**  
+Dernière mise à jour : **31/08/2026**
+
+---
 
 ## 🎥 Vidéos — Installation & utilisation
+
+> Ces vidéos montrent **la première version du script**. Elles restent utiles pour comprendre le principe général, mais l’interface et certaines fonctions ont évolué depuis.
 
 ### 1️⃣ Installation initiale
 [![Installation Amazon Vine FR — Scan Éval](https://img.youtube.com/vi/jv_eiwLMNsQ/hqdefault.jpg)](https://www.youtube.com/watch?v=jv_eiwLMNsQ)
@@ -13,336 +19,199 @@ Description du projet et manuel d’installation / d’utilisation
 
 (Merci a @Ellui pour les avoir réalisées)
 
---------------------------------------------------------------------------------------------------------------------------------------------------------------
+---
 
-Dernière mise à jour : 20/12/2025
+## 1. Ce que fait le script
 
-1. Description du projet
+Le script fonctionne sur les pages Amazon Vine France :
 
-Ce script Tampermonkey est un outil d’analyse avancée pour Amazon Vine France, conçu pour offrir une vision fiable, lisible et persistante des évaluations terminées (review-type=completed).
+- `/vine/account` pour mémoriser le début de la période d’évaluation ;
+- `/vine/vine-reviews?review-type=completed` pour le Scan et le Refresh ;
+- `/review/create-review...` pour suivre les modifications réellement envoyées sur les avis `Non approuvé` modifiables.
 
-Il permet de :
+Le tableau principal affiche :
 
-Scanner automatiquement toutes les évaluations terminées
+- **En attente d'approbation** ;
+- **En attente** ;
+- **Excellent** ;
+- **Bien** ;
+- **Juste** ;
+- **Pauvre** ;
+- **Non approuvé** ;
+- les informations du dernier Scan/Refresh ;
+- un **score pondéré /4** calculé à partir des avis notés.
 
-Classifier la qualité des évaluations en catégories normalisées
+Les catégories de qualité et le statut du commentaire sont lus séparément. Un avis est considéré `Non approuvé` uniquement à partir du champ Amazon **Statut du commentaire**.
 
-Compter les éléments par catégorie :
+---
 
-En attente
+## 2. Période d’évaluation
 
-Excellent
+Avant le premier Scan, ouvrir :
 
-Bien
+`https://www.amazon.fr/vine/account`
 
-Juste
+Le script lit la date de début de la période Vine et la mémorise localement.
 
-Pauvre
+Le Scan et le Refresh ignorent ensuite les avis antérieurs à cette date.
 
-N.P. (non parvenu / non disponible)
+---
 
-Calculer un score pondéré (/4) basé sur les avis notés
+## 3. Scan complet
 
-Suivre les évolutions entre deux exécutions (deltas)
+Sur la page des avis terminés :
 
-Mettre à jour uniquement les éléments “En attente” via un refresh incrémental sécurisé
+`https://www.amazon.fr/vine/vine-reviews?review-type=completed`
 
-Afficher les résultats directement dans l’interface Vine, sans export externe
+Cliquer sur **Scan**.
 
-Vision temporelle
+Le Scan :
 
-Le script fonctionne exclusivement sur la période d’évaluation active :
+- repart de la page 1 ;
+- parcourt les pages de la période ;
+- classe les avis selon leur qualité ;
+- compte séparément les avis `En attente d'approbation` ;
+- détecte les avis `Non approuvé` pendant le passage ;
+- mémorise les données nécessaires aux Refresh suivants ;
+- affiche le total, le nombre de pages et le dernier Scan ;
+- recalcule le score pondéré.
 
-🔹 Depuis éval : à partir de la date officielle de début de période Vine
+Le passage d’une page à l’autre est volontairement temporisé.
 
-Les éléments hors période sont automatiquement ignorés
+---
 
-2. Principe fondamental du projet
+## 4. Refresh
 
-Le scan complet doit toujours être fiable, reproductible et indépendant.
+Après un Scan complet, le bouton devient **Refresh**.
 
-Principes clés :
+Le Refresh ne repart pas de zéro. Il utilise les informations mémorisées pour retrouver les éléments qui doivent encore être surveillés, notamment :
 
-Le scan est idempotent et autonome
+- les avis `En attente` ;
+- les avis `En attente d'approbation` ;
+- les avis `Non approuvé` déjà connus.
 
-Le refresh est incrémental et strictement séparé
+Il supporte le déplacement des avis d’une page à l’autre lorsque de nouveaux avis apparaissent.
 
-Aucune logique incrémentale n’interfère avec le scan
+Pendant le Refresh, l’interface affiche la page en cours, par exemple :
 
-Aucun “marker” n’est utilisé dans le scan
+`Refresh page 8 ...`
 
-Toute donnée persistée est validée et nettoyée
+Les trois points sont animés.
 
-Si ces règles sont enfreintes → bug garanti.
+Lorsqu’un `Non approuvé` est rencontré, l’affichage devient par exemple :
 
-3. Architecture conceptuelle
+`Refresh page 8 | Non approuvé: contrôle ...`
 
-Le projet est structuré en blocs indépendants.
+Le Refresh met à jour les compteurs sans effacer les données du Scan précédent.
 
-A. Scan (cœur du système)
+---
 
-Scan séquentiel de toutes les pages Vine
+## 5. Gestion des avis « Non approuvé »
 
-Rythme humain :
+La colonne principale affiche le nombre d’avis détectés sous la forme :
 
-2 à 4 secondes par page
+`2 ✏️ (23 🚫)`
 
-pauses aléatoires
+- **✏️** = avis identifié comme modifiable ;
+- **🚫** = avis non modifiable ou non confirmé automatiquement comme modifiable.
 
-Aucune dépendance à un état précédent
+Le nombre avec le crayon est cliquable et ouvre la page dédiée aux `Non approuvé`.
 
-Aucune écriture partielle ou intermédiaire
+### Page dédiée
 
-Arrêt automatique :
+La page contient deux sections :
 
-fin de période détectée
+1. **Modifiables** ;
+2. **Non modifiables**.
 
-captcha / login
+Pour chaque avis, le script conserve le vrai lien Amazon `Revoir` trouvé dans la ligne Vine. Il ne reconstruit pas artificiellement l’URL à partir de l’ASIN.
 
-HTML invalide ou erreurs répétées
+### Vérifier un avis
 
-👉 Le scan produit un état complet, cohérent et fiable.
+Dans la section des non modifiables :
 
-B. État persistant (LocalStorage)
+- **Vérifier** ouvre le vrai lien Amazon dans un nouvel onglet ;
+- dès le clic, le bouton devient **✓ Visité** ;
+- si Amazon affiche réellement la page de blocage, l’état peut devenir **✓ Vérifié** ;
+- si l’avis est finalement modifiable, la case **Modifiable** permet de le reclasser manuellement dans la section des modifiables.
 
-Stockage local par domaine (amazon.fr) :
+Une promotion manuelle en `Modifiable` est mémorisée et n’est pas annulée par un Refresh suivant.
 
-Comptages par catégorie
+### Avis modifié
 
-Nombre total d’éléments scannés
+Pour un avis modifiable, le simple fait d’ouvrir l’éditeur ne suffit pas.
 
-Nombre de pages scannées
+Le script compare l’état initial et l’état envoyé :
 
-Date / heure du dernier scan
+- texte ;
+- titre ;
+- étoiles ;
+- photos / vidéos.
 
-État précédent (pour calcul des deltas)
+La mention **✓ Modifié** apparaît uniquement si quelque chose a réellement changé et que le vrai bouton Amazon **Envoyer** a été utilisé.
 
-Période d’évaluation active
+---
 
-Base ASIN dédiée au refresh (pending)
+## 6. Données enregistrées
 
-Nettoyage automatique des entrées invalides ou “unknown”.
+Les données sont stockées uniquement dans le `localStorage` du navigateur pour `amazon.fr` :
 
-Aucune communication externe.
-Aucun serveur.
-Tout reste local.
+- période d’évaluation ;
+- compteurs ;
+- dernier Scan ;
+- état précédent pour les évolutions ;
+- informations nécessaires au Refresh ;
+- état des `Non approuvé` ;
+- liens visités ;
+- confirmations manuelles ;
+- avis réellement modifiés.
 
-C. Capture Compte Vine (/vine/account)
+Aucun serveur externe n’est utilisé par le script.
 
-Fonctions dédiées qui :
+`GM_xmlhttpRequest` sert à charger les pages Amazon nécessaires aux contrôles et `GM_addStyle` à l’interface.
 
-Lisent la date de début de période directement depuis le DOM
+---
 
-Supportent formats :
+## 7. Installation
 
-DD/MM/YYYY
+Prérequis :
 
-mois français
+- navigateur desktop compatible avec Tampermonkey ;
+- extension **Tampermonkey** ;
+- compte Amazon Vine France.
 
-Écrivent en mémoire uniquement si la valeur change
+Installation manuelle :
 
-Affichent une modale d’information (2 secondes) uniquement en cas de modification
+1. ouvrir le fichier `amazon-vine-eval-scan.user.js` dans ce dépôt ;
+2. afficher la version **Raw** ;
+3. copier tout le contenu ;
+4. créer un nouveau script dans Tampermonkey ;
+5. remplacer le contenu par celui du fichier ;
+6. sauvegarder et vérifier que le script est activé.
 
-⚠️ Cette capture :
+---
 
-n’interfère jamais avec le scan
+## 8. Reset
 
-n’interfère jamais avec le refresh
+Le lien **Reset** efface les données locales utilisées par le script :
 
-D. Interface utilisateur (UI)
+- compteurs et état du Scan ;
+- période mémorisée ;
+- base utilisée pour le Refresh et les `Non approuvé`.
 
-Injection non invasive dans la page Vine
+Le bouton redevient ensuite **Scan**.
 
-Layout flex :
+À utiliser uniquement si l’on veut réellement repartir de zéro.
 
-tableau à gauche
+---
 
-carte score à droite
+## 9. Résumé du fonctionnement
 
-Tableau clair à colonnes fixes
+1. ouvrir `/vine/account` pour mémoriser la période ;
+2. ouvrir les avis terminés ;
+3. lancer **Scan** une première fois ;
+4. utiliser ensuite **Refresh** pour les mises à jour ;
+5. cliquer sur le compteur `Non approuvé` pour contrôler les avis concernés ;
+6. utiliser `Vérifier`, `Modifiable` et `✓ Modifié` pour suivre leur traitement.
 
-En-tête informatif :
-
-Dernier scan
-
-Infos d’exécution
-
-Carte “Score pondéré /4” :
-
-nombre d’avis notés
-
-label qualitatif (Excellent / Moyen / Mauvais)
-
-Animation visuelle légère (pulse x3) sur mise à jour
-
-Synchronisation de hauteur :
-
-carte = master
-
-tableau = slave (desktop)
-
-flow normal en mobile
-
-Aucun polling continu.
-Aucune surcharge DOM.
-
-E. Refresh (incrémental, sécurisé)
-
-Le refresh est désormais pleinement implémenté, en respectant strictement les règles d’or.
-
-Fonctionnement :
-
-S’appuie uniquement sur les éléments En attente
-
-Ne relance jamais un scan complet
-
-Accepte le déplacement (“shift”) des entrées entre pages
-
-Met à jour :
-
-les changements de statut
-
-les changements de note
-
-Ajuste correctement les compteurs :
-
-décrément ancien état
-
-incrément nouvel état
-
-Arrêt automatique :
-
-hors période
-
-captcha / login
-
-HTML invalide
-
-Le refresh est idempotent, sûr, et non destructif.
-
-4. Manuel d’installation
-Prérequis
-
-Navigateur desktop (Chrome, Edge, Firefox)
-
-Extension Tampermonkey
-
-Compte Amazon Vine France
-
-Installation
-
-Ouvrir Tampermonkey
-
-Créer un nouveau script
-
-Coller le code complet du projet
-
-Sauvegarder
-
-Vérifier que le script est activé
-
-Permissions utilisées
-
-GM_xmlhttpRequest → chargement des pages Vine
-
-GM_addStyle → styles UI
-
-localStorage → persistance locale
-
-5. Manuel d’utilisation
-5.1 Première configuration (une seule fois)
-
-Aller sur
-👉 https://www.amazon.fr/vine/account
-
-Le script :
-
-capture la période d’évaluation
-
-affiche une modale de confirmation
-
-Terminé.
-
-5.2 Scan complet
-
-Aller sur
-👉 https://www.amazon.fr/vine/vine-reviews?review-type=completed
-
-Cliquer sur Scan
-
-Le script :
-
-démarre à la page 1
-
-scanne toutes les pages de la période
-
-s’arrête proprement si nécessaire
-
-En fin de scan :
-
-tableau mis à jour
-
-deltas affichés
-
-score recalculé
-
-💡 Le scan peut être relancé à tout moment.
-
-5.3 Refresh
-
-Après un scan complet :
-
-Le bouton devient Refresh
-
-Le refresh :
-
-met à jour uniquement les “En attente”
-
-ajuste les compteurs si nécessaire
-
-n’altère jamais le scan de référence
-
-5.4 Reset
-
-Lien Reset dans l’interface.
-
-Efface :
-
-comptages
-
-période
-
-états précédents
-
-base refresh
-
-⚠️ À utiliser uniquement si :
-
-changement de compte
-
-reset réel de Vine
-
-besoin de repartir de zéro
-
-6. Règles d’or du projet
-
-Ne jamais mélanger scan et refresh
-
-Ne jamais utiliser de marker dans le scan
-
-Ne jamais sauvegarder un état partiel
-
-Ne jamais réinitialiser pendant un refresh
-
-UI ≠ logique métier
-
-Capture compte ≠ scan
-
-7. État actuel du projet
-
-✔ Scan complet stable
-✔ Persistance fiable
-✔ Interface claire et lisible
-✔ Capture Compte Vine robuste
-✔ Refresh incrémental sécurisé
-✔ Bug des “articles non disponibles” corrigé
+Le script est conçu spécifiquement pour **Amazon Vine France**.

@@ -1,0 +1,47 @@
+name: Finalize 3.4.8 release
+
+on:
+  push:
+    branches:
+      - feature/non-approuve-workflow
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: ${{ !contains(github.event.head_commit.message, '[release-3.4.8-done]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/non-approuve-workflow
+          fetch-depth: 0
+
+      - name: Finalize version
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('amazon-vine-eval-scan.user.js')
+          s = p.read_text(encoding='utf-8')
+          old = '// @version      3.4.8-dev'
+          new = '// @version      3.4.8'
+          if old not in s:
+              raise SystemExit('Expected 3.4.8-dev version not found')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          PY
+
+      - name: Verify script
+        run: |
+          node --check amazon-vine-eval-scan.user.js
+          npx --yes eslint@8 --no-eslintrc --env browser,es2022 --parser-options '{"ecmaVersion":2022}' --rule 'curly:["error","all"]' amazon-vine-eval-scan.user.js
+
+      - name: Remove temporary workflow and commit
+        run: |
+          rm -f .github/workflows/release-3.4.8.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add amazon-vine-eval-scan.user.js .github/workflows/release-3.4.8.yml
+          git commit -m "Finalize v3.4.8 release [release-3.4.8-done]"
+          git push origin HEAD:feature/non-approuve-workflow

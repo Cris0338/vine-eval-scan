@@ -26,76 +26,30 @@ jobs:
           from pathlib import Path
           p = Path('amazon-vine-eval-scan.user.js')
           s = p.read_text(encoding='utf-8')
-
           old_version = '// @version      3.4.8'
           if old_version not in s:
               raise SystemExit('Expected version 3.4.8 not found')
           s = s.replace(old_version, '// @version      3.4.9', 1)
-
-          old = '''  function formatFR(iso) {
-    return iso ? new Date(iso).toLocaleString("fr-FR") : "—";
-  }
-'''
-          new = '''  function formatFR(iso) {
-    return iso ? new Date(iso).toLocaleString("fr-FR") : "—";
-  }
-  function formatOrderDateFromTs(ts) {
-    const n = Number(ts);
-    if (!Number.isFinite(n)) {
-      return "";
-    }
-    const d = new Date(n);
-    return Number.isNaN(d.getTime())
-      ? ""
-      : d.toLocaleDateString("fr-FR", {
-          day: "2-digit",
-          month: "2-digit",
-          year: "numeric",
-        });
-  }
-'''
-          if old not in s:
+          anchor = '  function formatFR(iso) {\n    return iso ? new Date(iso).toLocaleString("fr-FR") : "—";\n  }\n'
+          helper = '  function formatOrderDateFromTs(ts) {\n    const n = Number(ts);\n    if (!Number.isFinite(n)) {\n      return "";\n    }\n    const d = new Date(n);\n    return Number.isNaN(d.getTime())\n      ? ""\n      : d.toLocaleDateString("fr-FR", {\n          day: "2-digit",\n          month: "2-digit",\n          year: "numeric",\n        });\n  }\n'
+          if anchor not in s:
               raise SystemExit('formatFR anchor not found')
-          s = s.replace(old, new, 1)
-
-          old = '''      orderDateText: (tsCell?.textContent || "").replace(/\\s+/g, " ").trim(),
-      orderTs: ts,
-'''
-          new = '''      orderDateText:
-        (tsCell?.textContent || "").replace(/\\s+/g, " ").trim() ||
-        formatOrderDateFromTs(ts),
-      orderTs: ts,
-'''
-          if old not in s:
+          s = s.replace(anchor, anchor + helper, 1)
+          old_date = '      orderDateText: (tsCell?.textContent || "").replace(/\\s+/g, " ").trim(),'
+          new_date = '      orderDateText:\n        (tsCell?.textContent || "").replace(/\\s+/g, " ").trim() ||\n        formatOrderDateFromTs(ts),'
+          if old_date not in s:
               raise SystemExit('extractProductMeta orderDateText anchor not found')
-          s = s.replace(old, new, 1)
-
-          old = '''    const image = (r) =>
-      r.imageUrl
-        ? `<img class="nap-img" src="${escapeHtml(r.imageUrl)}" alt="">`
-        : "—";
-    const checkButton = (r) => {
-'''
-          new = '''    const image = (r) =>
-      r.imageUrl
-        ? `<img class="nap-img" src="${escapeHtml(r.imageUrl)}" alt="">`
-        : "—";
-    const orderDate = (r) =>
-      escapeHtml(
-        r.orderDateText || formatOrderDateFromTs(r.orderTs) || "—",
-      );
-    const checkButton = (r) => {
-'''
-          if old not in s:
-              raise SystemExit('render image/checkButton anchor not found')
-          s = s.replace(old, new, 1)
-
-          old = '${escapeHtml(r.orderDateText || "—")}'
-          count = s.count(old)
+          s = s.replace(old_date, new_date, 1)
+          check_anchor = '    const checkButton = (r) => {'
+          order_helper = '    const orderDate = (r) =>\n      escapeHtml(\n        r.orderDateText || formatOrderDateFromTs(r.orderTs) || "—",\n      );\n'
+          if check_anchor not in s:
+              raise SystemExit('checkButton anchor not found')
+          s = s.replace(check_anchor, order_helper + check_anchor, 1)
+          old_render = '${escapeHtml(r.orderDateText || "—")}'
+          count = s.count(old_render)
           if count != 2:
               raise SystemExit(f'Expected 2 order date render occurrences, found {count}')
-          s = s.replace(old, '${orderDate(r)}')
-
+          s = s.replace(old_render, '${orderDate(r)}')
           p.write_text(s, encoding='utf-8')
           PY
 

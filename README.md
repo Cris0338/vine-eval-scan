@@ -2,8 +2,8 @@
 
 Script Tampermonkey pour Amazon Vine France. Il analyse les avis terminés de la période d’évaluation en cours, affiche les compteurs directement dans Vine, calcule un score pondéré et permet de suivre les avis `Non approuvé`.
 
-Version actuelle : **3.4.8**  
-Dernière mise à jour : **31/08/2026**
+Version actuelle : **3.4.9**  
+Dernière mise à jour : **01/09/2026**
 
 ---
 

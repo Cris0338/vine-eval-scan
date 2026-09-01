@@ -1,0 +1,115 @@
+name: Fix Non approuve order dates
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/fix-non-approved-order-date.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Patch order date fallback
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('amazon-vine-eval-scan.user.js')
+          s = p.read_text(encoding='utf-8')
+
+          old_version = '// @version      3.4.8'
+          if old_version not in s:
+              raise SystemExit('Expected version 3.4.8 not found')
+          s = s.replace(old_version, '// @version      3.4.9', 1)
+
+          old = '''  function formatFR(iso) {
+    return iso ? new Date(iso).toLocaleString("fr-FR") : "—";
+  }
+'''
+          new = '''  function formatFR(iso) {
+    return iso ? new Date(iso).toLocaleString("fr-FR") : "—";
+  }
+  function formatOrderDateFromTs(ts) {
+    const n = Number(ts);
+    if (!Number.isFinite(n)) {
+      return "";
+    }
+    const d = new Date(n);
+    return Number.isNaN(d.getTime())
+      ? ""
+      : d.toLocaleDateString("fr-FR", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+        });
+  }
+'''
+          if old not in s:
+              raise SystemExit('formatFR anchor not found')
+          s = s.replace(old, new, 1)
+
+          old = '''      orderDateText: (tsCell?.textContent || "").replace(/\\s+/g, " ").trim(),
+      orderTs: ts,
+'''
+          new = '''      orderDateText:
+        (tsCell?.textContent || "").replace(/\\s+/g, " ").trim() ||
+        formatOrderDateFromTs(ts),
+      orderTs: ts,
+'''
+          if old not in s:
+              raise SystemExit('extractProductMeta orderDateText anchor not found')
+          s = s.replace(old, new, 1)
+
+          old = '''    const image = (r) =>
+      r.imageUrl
+        ? `<img class="nap-img" src="${escapeHtml(r.imageUrl)}" alt="">`
+        : "—";
+    const checkButton = (r) => {
+'''
+          new = '''    const image = (r) =>
+      r.imageUrl
+        ? `<img class="nap-img" src="${escapeHtml(r.imageUrl)}" alt="">`
+        : "—";
+    const orderDate = (r) =>
+      escapeHtml(
+        r.orderDateText || formatOrderDateFromTs(r.orderTs) || "—",
+      );
+    const checkButton = (r) => {
+'''
+          if old not in s:
+              raise SystemExit('render image/checkButton anchor not found')
+          s = s.replace(old, new, 1)
+
+          old = '${escapeHtml(r.orderDateText || "—")}'
+          count = s.count(old)
+          if count != 2:
+              raise SystemExit(f'Expected 2 order date render occurrences, found {count}')
+          s = s.replace(old, '${orderDate(r)}')
+
+          p.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Format and verify
+        run: |
+          npx --yes prettier@3.3.3 --write amazon-vine-eval-scan.user.js
+          node --check amazon-vine-eval-scan.user.js
+          npx --yes eslint@8 --no-eslintrc --env browser,es2022 --parser-options '{"ecmaVersion":2022}' --rule 'curly:["error","all"]' amazon-vine-eval-scan.user.js
+
+      - name: Remove temporary workflow and commit
+        run: |
+          rm .github/workflows/fix-non-approved-order-date.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add amazon-vine-eval-scan.user.js .github/workflows/fix-non-approved-order-date.yml
+          git commit -m "Fix Non approuve order date display"
+          git push origin HEAD:main

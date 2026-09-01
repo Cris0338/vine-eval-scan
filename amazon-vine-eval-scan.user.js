@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Amazon Vine FR — Scan Éval — "Light"
 // @namespace    https://tampermonkey.net/
-// @version      3.4.8
+// @version      3.4.9
 // @description  v3.3.9 baseline + Non approuvé workflow, visited tracking, manual promotion and real Envoyer modification tracking
 // @author       Cris0338
 // @match        https://www.amazon.fr/vine/vine-reviews*
@@ -248,6 +248,20 @@
   }
   function formatFR(iso) {
     return iso ? new Date(iso).toLocaleString("fr-FR") : "—";
+  }
+  function formatOrderDateFromTs(ts) {
+    const n = Number(ts);
+    if (!Number.isFinite(n)) {
+      return "";
+    }
+    const d = new Date(n);
+    return Number.isNaN(d.getTime())
+      ? ""
+      : d.toLocaleDateString("fr-FR", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+        });
   }
   function absoluteAmazonUrl(href) {
     if (!href) {
@@ -702,7 +716,9 @@
         : null,
       imageUrl:
         image?.getAttribute("src") || image?.getAttribute("data-src") || null,
-      orderDateText: (tsCell?.textContent || "").replace(/\s+/g, " ").trim(),
+      orderDateText:
+        (tsCell?.textContent || "").replace(/\s+/g, " ").trim() ||
+        formatOrderDateFromTs(ts),
       orderTs: ts,
     };
   }
@@ -1318,6 +1334,8 @@
       r.imageUrl
         ? `<img class="nap-img" src="${escapeHtml(r.imageUrl)}" alt="">`
         : "—";
+    const orderDate = (r) =>
+      escapeHtml(r.orderDateText || formatOrderDateFromTs(r.orderTs) || "—");
     const checkButton = (r) => {
       if (!r.editUrl) {
         return "—";
@@ -1334,13 +1352,13 @@
     const modRows = modifiable
       .map(
         (r) =>
-          `<tr><td>${image(r)}</td><td>${product(r)}</td><td>${escapeHtml(r.orderDateText || "—")}</td><td>${escapeHtml(r.reviewStatus || "Non approuvé")}</td><td>${r.modified ? '<span class="nap-modified">✓ Modifié</span>' : "—"}</td><td><a class="nap-action" href="${escapeHtml(r.editUrl)}" target="_blank" rel="noopener">Modifier le commentaire</a></td></tr>`,
+          `<tr><td>${image(r)}</td><td>${product(r)}</td><td>${orderDate(r)}</td><td>${escapeHtml(r.reviewStatus || "Non approuvé")}</td><td>${r.modified ? '<span class="nap-modified">✓ Modifié</span>' : "—"}</td><td><a class="nap-action" href="${escapeHtml(r.editUrl)}" target="_blank" rel="noopener">Modifier le commentaire</a></td></tr>`,
       )
       .join("");
     const blockedRows = blocked
       .map(
         (r) =>
-          `<tr><td>${image(r)}</td><td>${product(r)}</td><td>${escapeHtml(r.orderDateText || "—")}</td><td>${escapeHtml(r.reviewStatus || "Non approuvé")}</td><td><label class="nap-promote"><input type="checkbox" data-nap-promote-key="${escapeHtml(r.key || "")}"> Modifiable</label></td><td>${checkButton(r)}</td></tr>`,
+          `<tr><td>${image(r)}</td><td>${product(r)}</td><td>${orderDate(r)}</td><td>${escapeHtml(r.reviewStatus || "Non approuvé")}</td><td><label class="nap-promote"><input type="checkbox" data-nap-promote-key="${escapeHtml(r.key || "")}"> Modifiable</label></td><td>${checkButton(r)}</td></tr>`,
       )
       .join("");
     root.innerHTML = `<div class="nap-head"><h2>Non approuvés</h2><a class="nap-back" href="${normalReviewsUrl()}">← Retour aux avis</a></div><section class="nap-section"><h3>Modifiables — ${modifiable.length} ✏️</h3>${modifiable.length ? `<div class="nap-table-wrap"><table><thead><tr><th>Image</th><th>Produit</th><th>Date de la commande</th><th>Statut du commentaire</th><th>Modifié</th><th>Action</th></tr></thead><tbody>${modRows}</tbody></table></div>` : '<div class="nap-empty">Aucun commentaire modifiable.</div>'}</section><div class="nap-separator"></div><section class="nap-section"><h3>Non modifiables — ${blocked.length} 🚫</h3>${blocked.length ? `<div class="nap-table-wrap"><table><thead><tr><th>Image</th><th>Produit</th><th>Date de la commande</th><th>Statut du commentaire</th><th>Contrôle</th><th>Action</th></tr></thead><tbody>${blockedRows}</tbody></table></div>` : '<div class="nap-empty">Aucun commentaire non modifiable.</div>'}</section>`;
